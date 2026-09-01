@@ -1,0 +1,17 @@
+{
+  "name": "veritiles-video-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test 'test/**/*.test.js'",
+    "test:browser": "node scripts/browser-check.mjs",
+    "prepare-video": "node scripts/prepare-video.mjs",
+    "build": "node scripts/build.mjs",
+    "serve": "node scripts/serve.mjs dist"
+  },
+  "dependencies": {
+    "multiformats": "14.0.4",
+    "veritiles": "0.4.0"
+  }
+}

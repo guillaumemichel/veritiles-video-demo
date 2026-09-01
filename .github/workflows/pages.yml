@@ -1,0 +1,57 @@
+# Build the demo and publish it to GitHub Pages. Only source is committed;
+# the video is fetched from the Blender Foundation mirror, remuxed, packed,
+# and verified here on every deploy. data/ (the remuxed video) is cached so
+# the 263 MB download and the remux run only when the pipeline changes.
+name: Deploy demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a newer push supersedes an in-flight run.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: video-${{ hashFiles('scripts/prepare-video.mjs') }}
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg unzip
+      - run: npm run prepare-video
+      - run: npm run build # packs, assembles dist/, and verifies it through the released client
+      # Requires the Pages site to exist (one-time): Settings → Pages →
+      # Source → GitHub Actions, or:
+      #   gh api repos/OWNER/REPO/pages -X POST -f build_type=workflow
+      # (creating it needs admin scope, which GITHUB_TOKEN doesn't get).
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>veritiles — verified video from an untrusted host</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px 16px 48px; background: #101418; color: #d7dde3;
+      font: 15px/1.5 system-ui, sans-serif; display: flex; justify-content: center;
+    }
+    main { width: min(960px, 100%); }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .lede { margin: 0 0 16px; color: #9aa7b2; }
+    .lede a, footer a, details a { color: #7fb4e8; }
+    video { width: 100%; background: #000; border-radius: 8px; display: block; }
+    #panel {
+      margin-top: 12px; background: #171d24; border: 1px solid #232c36;
+      border-radius: 8px; padding: 12px 16px; font-family: ui-monospace, monospace; font-size: 13px;
+    }
+    #toggle { display: flex; gap: 8px; align-items: center; cursor: pointer; margin-bottom: 10px; font-family: system-ui, sans-serif; font-size: 14px; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { text-align: left; padding: 2px 14px 2px 0; white-space: nowrap; }
+    th { color: #7c8894; font-weight: normal; }
+    td.num { text-align: right; }
+    .ok { color: #7fd08a; }
+    .bad { color: #e8837f; }
+    #counters { display: flex; gap: 24px; margin-top: 10px; color: #9aa7b2; flex-wrap: wrap; }
+    #counters b { color: #d7dde3; font-weight: 600; }
+    #alert {
+      margin: 10px 0 0; padding: 8px 12px; border-radius: 6px; border: 1px solid #7a3b38;
+      background: #2a1917; color: #e8a29e; font-family: system-ui, sans-serif;
+    }
+    details { margin-top: 16px; color: #9aa7b2; }
+    details summary { cursor: pointer; color: #d7dde3; }
+    code.cid { word-break: break-all; color: #b8c4cf; }
+    footer { margin-top: 24px; color: #66727d; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Verified video from an untrusted host</h1>
+    <p class="lede">
+      This player streams Big Buck Bunny over plain HTTP range requests and
+      cryptographically verifies every byte against a single
+      <a href="https://github.com/guillaumemichel/veritiles">veritiles</a> anchor CID
+      before the decoder sees it. The host is untrusted: flip the switch below to
+      route reads through a mirror serving tampered bytes — they are caught,
+      counted, and never rendered.
+    </p>
+    <video id="video" controls playsinline></video>
+    <section id="panel">
+      <label id="toggle">
+        <input type="checkbox" id="evilToggle">
+        route through a malicious mirror first (tampered copy, tried before the honest one)
+      </label>
+      <table>
+        <thead><tr><th>source</th><th class="num">requests</th><th class="num">transferred</th><th>status</th></tr></thead>
+        <tbody id="mirrors"></tbody>
+      </table>
+      <div id="counters"></div>
+      <p id="alert" hidden></p>
+    </section>
+    <details>
+      <summary>How it works</summary>
+      <p>
+        The page ships one trust input, the anchor CID
+        <code class="cid" id="anchor"></code>.
+        The video's proof — a tiny descriptor plus a shard of leaf digests — is a
+        directory of static files beside it; the client fetches only the pieces
+        covering what it reads and verifies each 1&nbsp;MiB leaf with WebCrypto
+        sha2-256 before use. The player parses the fragmented MP4's global
+        <code>sidx</code> from the first verified leaf and streams moof/mdat
+        segments into Media Source Extensions with ~30&nbsp;s of buffer ahead;
+        seeking jumps the read cursor. A source whose bytes fail verification is
+        dropped for the rest of the session and the next one takes over.
+      </p>
+    </details>
+    <footer>
+      Video: <a href="https://peach.blender.org/">Big Buck Bunny</a>
+      © 2008 Blender Foundation / bigbuckbunny.org,
+      <a href="https://creativecommons.org/licenses/by/3.0/">CC-BY 3.0</a>
+      (remuxed to fragmented MP4, AC-3 track dropped) ·
+      <a href="https://github.com/guillaumemichel/veritiles-video-demo">source</a>
+    </footer>
+  </main>
+  <script type="module">
+    import { VerifiedFile } from './vendor/veritiles.js';
+    import { startStream } from './web/player.js';
+
+    const CONFIG = 'VERITILES_CONFIG';
+
+    const GOOD = new URL('bbb.mp4', location.href).href;
+    const EVIL = new URL('evil/bbb.mp4', location.href).href;
+    const PROOF = new URL('bbb.mp4.proofs', location.href).href;
+    const LABELS = new Map([
+      [EVIL, 'malicious mirror'],
+      [GOOD, 'honest mirror'],
+      [PROOF, 'proof files'],
+    ]);
+
+    const video = document.getElementById('video');
+    const toggle = document.getElementById('evilToggle');
+    const mirrors = document.getElementById('mirrors');
+    const counters = document.getElementById('counters');
+    const alertBox = document.getElementById('alert');
+    document.getElementById('anchor').textContent = CONFIG.cid;
+
+    let current = null;
+    let generation = 0;
+
+    async function start(withEvil) {
+      const gen = ++generation;
+      toggle.disabled = true;
+      const resumeAt = current ? video.currentTime : 0;
+      const wasPlaying = current !== null && !video.paused && !video.ended;
+      current?.stop();
+      current = null;
+      render(null);
+      let stream;
+      try {
+        stream = await startStream({
+          video,
+          cid: CONFIG.cid,
+          sources: withEvil ? [EVIL, GOOD] : [GOOD],
+          proof: PROOF,
+          codecs: CONFIG.codecs,
+          VerifiedFile,
+          labels: LABELS,
+          onUpdate: render,
+        });
+      } catch (err) {
+        if (gen === generation) showAlert(`✗ ${err.message}`);
+        return;
+      } finally {
+        if (gen === generation) toggle.disabled = false;
+      }
+      if (gen !== generation) {
+        stream.stop(); // superseded while opening
+        return;
+      }
+      current = stream;
+      if (resumeAt > 0) video.currentTime = resumeAt;
+      if (wasPlaying) video.play().catch(() => {});
+    }
+
+    function render(snapshot) {
+      if (snapshot === null) {
+        mirrors.replaceChildren();
+        counters.replaceChildren();
+        alertBox.hidden = true;
+        return;
+      }
+      const { stats, transfers } = snapshot;
+      mirrors.replaceChildren(...transfers.map(({ base, label, requests, bytes }) => {
+        const row = document.createElement('tr');
+        const tampered = base === EVIL && stats.rejected > 0;
+        row.innerHTML = `
+          <td>${label}</td>
+          <td class="num">${requests}</td>
+          <td class="num">${formatBytes(bytes)}</td>
+          <td class="${tampered ? 'bad' : 'ok'}">${status(base, requests, tampered)}</td>`;
+        return row;
+      }));
+      counters.innerHTML = `
+        <span>verified <b>${stats.verified}</b> leaves</span>
+        <span>rejected <b class="${stats.rejected ? 'bad' : ''}">${stats.rejected}</b></span>
+        <span>segment <b>${snapshot.segment}/${snapshot.segments}</b></span>
+        <span>buffered <b>${snapshot.aheadSeconds.toFixed(1)} s</b> ahead</span>`;
+      if (snapshot.error) {
+        showAlert(`✗ ${snapshot.error.message}`);
+      } else if (stats.rejected > 0) {
+        showAlert('⛔ Tampered bytes caught and rejected — the malicious mirror is banned for this '
+          + 'session, and playback continues from the honest one. Not one altered byte was rendered.');
+      } else {
+        alertBox.hidden = true;
+      }
+    }
+
+    function status(base, requests, tampered) {
+      if (tampered) return 'tampered — banned';
+      if (requests === 0) return 'idle';
+      return base === PROOF ? 'verified' : 'serving verified bytes';
+    }
+
+    function showAlert(text) {
+      alertBox.textContent = text;
+      alertBox.hidden = false;
+    }
+
+    function formatBytes(bytes) {
+      return bytes < 1e5 ? `${(bytes / 1e3).toFixed(1)} kB` : `${(bytes / 1e6).toFixed(1)} MB`;
+    }
+
+    toggle.addEventListener('change', () => start(toggle.checked));
+    start(false);
+  </script>
+</body>
+</html>

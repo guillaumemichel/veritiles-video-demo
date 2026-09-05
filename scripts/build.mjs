@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Assemble the static site: pack data/bbb.mp4 into its veritiles proof
 // directory, publish the video plus a deliberately tampered mirror copy,
-// inject the freshly computed anchor CID into the page, and then read the
-// result back through the released veritiles client — both the honest path
-// and the tampered-first failover — before calling the build good.
+// inject the preset (freshly computed anchor CID + paths) into the page, and
+// then read the result back through the released veritiles client — both the
+// honest path and the tampered-first failover — before calling the build good.
 import { Buffer } from 'node:buffer';
 import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -13,7 +13,7 @@ import { VerifiedFile } from 'veritiles';
 
 import { directoryFetch } from './lib/local-fetch.js';
 import { DEFAULT_CHUNK, packFixed } from './lib/pack-fixed.js';
-import { parseIndex } from '../web/mp4.js';
+import { parseCodecs, parseIndex } from '../web/mp4.js';
 
 const VIDEO = 'bbb.mp4';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,7 +43,7 @@ async function main() {
   await copyFile(join(repoRoot, 'node_modules', 'veritiles', 'dist', 'index.js'), join(distDir, 'vendor', 'veritiles.js'));
   await writeFile(join(distDir, 'index.html'), injectConfig(
     await readFile(join(repoRoot, 'index.html'), 'utf8'),
-    { cid: packed.anchor, codecs: meta.codecs, durationSeconds: meta.durationSeconds },
+    { presets: [{ id: 'bbb', label: 'Big Buck Bunny', cid: packed.anchor, src: VIDEO, evil: `evil/${VIDEO}` }] },
   ));
 
   await verify(packed.anchor, bytes);
@@ -73,15 +73,19 @@ function injectConfig(page, config) {
   return page.replace(placeholder, `const CONFIG = ${JSON.stringify(config)};`);
 }
 
-// The published head must yield the segment index the player will run on.
+// The published head must yield the segment index and the codecs the player
+// will run on; ffprobe's values (data/bbb.json) are the reference.
 function checkIndex(bytes, meta) {
-  const index = parseIndex(bytes.subarray(0, 64 * 1024));
+  const head = bytes.subarray(0, 64 * 1024);
+  const index = parseIndex(head);
   if (index === null) throw new Error('no complete sidx in the first 64 KiB — check the ffmpeg movflags');
   const last = index.segments.at(-1);
   if (last.offset + last.size > bytes.length) throw new Error('sidx references run past end of file');
   if (Math.abs(index.duration - meta.durationSeconds) > 2) {
     throw new Error(`sidx duration ${index.duration}s disagrees with container ${meta.durationSeconds}s`);
   }
+  const codecs = parseCodecs(head);
+  if (codecs !== meta.codecs) throw new Error(`moov codecs ${codecs} disagree with ffprobe's ${meta.codecs}`);
 }
 
 // Read dist/ back through the released client, the way the page does.

@@ -1,9 +1,10 @@
-// Media Source Extensions player over a veritiles VerifiedFile: the segment
-// index comes from the file's global sidx, playback is sequential verified
-// segment reads with a buffered-ahead watermark, and seeks jump the read
-// cursor to the covering segment. Every byte handed to the decoder has been
-// verified against the anchor CID; tampered responses never reach it.
-import { parseIndex, segmentAt } from './mp4.js';
+// Media Source Extensions player over a veritiles VerifiedFile: the codecs
+// come from the file's moov and the segment index from its global sidx,
+// playback is sequential verified segment reads with a buffered-ahead
+// watermark, and seeks jump the read cursor to the covering segment. Every
+// byte handed to the decoder has been verified against the anchor CID;
+// tampered responses never reach it.
+import { parseCodecs, parseIndex, segmentAt } from './mp4.js';
 
 const TARGET_AHEAD_S = 30; // stop fetching once this much is buffered ahead
 const TRIM_KEEP_S = 10; // history kept behind the playhead on quota pressure
@@ -11,18 +12,22 @@ const HEAD_PROBE = 64 * 1024;
 const HEAD_PROBE_MAX = 8 * 1024 * 1024;
 const UPDATE_MS = 500;
 
-// { video, cid, sources, proof, codecs, VerifiedFile, labels?, onUpdate? }
+// { video, cid, sources, proof, VerifiedFile, labels?, onUpdate?, signal? }
 // → { stop(), snapshot(), vf }. The VerifiedFile class is injected so this
-// module stays import-free of the library bundle (testable in node).
-export async function startStream({ video, cid, sources, proof, codecs, VerifiedFile, labels, onUpdate }) {
-  const mime = `video/mp4; codecs="${codecs}"`;
-  if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported(mime)) {
-    throw new Error(`this browser cannot play ${mime} through Media Source Extensions`);
+// module stays import-free of the library bundle (testable in node); signal
+// aborts the opening reads so a superseding source needn't wait them out.
+export async function startStream({ video, cid, sources, proof, VerifiedFile, labels, onUpdate, signal: openSignal }) {
+  if (typeof MediaSource === 'undefined') {
+    throw new Error('this browser has no Media Source Extensions');
   }
 
   const transfers = trackTransfers([...sources, proof], labels);
   const vf = new VerifiedFile({ cid, source: sources, proof, fetchFn: transfers.fetchFn });
-  const index = await readIndex(vf);
+  const { index, codecs } = await readHead(vf, openSignal);
+  const mime = `video/mp4; codecs="${codecs}"`;
+  if (!MediaSource.isTypeSupported(mime)) {
+    throw new Error(`this browser cannot play ${mime} through Media Source Extensions`);
+  }
 
   const ctl = new AbortController();
   const { signal } = ctl;
@@ -35,7 +40,7 @@ export async function startStream({ video, cid, sources, proof, codecs, Verified
   // The fragmented init segment carries no duration; without this the
   // seekable range (and the native scrubber) would only span the buffer.
   ms.duration = index.duration;
-  sb.appendBuffer(await vf.read(0, index.initEnd));
+  sb.appendBuffer(await abortableRead(vf, 0, index.initEnd, openSignal));
 
   sb.addEventListener('updateend', onUpdateEnd, { signal });
   sb.addEventListener('error', () => fail(new Error('SourceBuffer error — append rejected by the decoder')), { signal });
@@ -130,6 +135,7 @@ export async function startStream({ video, cid, sources, proof, codecs, Verified
       segment: Math.min(state.next, index.segments.length),
       segments: index.segments.length,
       duration: index.duration,
+      codecs,
       aheadSeconds: bufferedAhead(),
       error: state.error,
     };
@@ -153,17 +159,30 @@ export async function startStream({ video, cid, sources, proof, codecs, Verified
   return { stop, snapshot, vf };
 }
 
-// Grow the head read until the global sidx is fully buffered. Reads clamp at
-// EOF, so a short return means the whole file was scanned without one.
-async function readIndex(vf) {
-  for (let probe = HEAD_PROBE; ; probe *= 4) {
-    const head = await vf.read(0, probe);
+// Grow the head read until the global sidx is fully buffered, then read the
+// codecs off the moov that precedes it. Reads clamp at EOF, so a short
+// return means the whole file was scanned without a sidx.
+async function readHead(vf, signal) {
+  for (let probe = HEAD_PROBE; ; probe = Math.min(probe * 4, HEAD_PROBE_MAX)) {
+    const head = await abortableRead(vf, 0, probe, signal);
     const index = parseIndex(head);
-    if (index !== null) return index;
+    if (index !== null) return { index, codecs: parseCodecs(head) };
     if (head.length < probe || probe >= HEAD_PROBE_MAX) {
       throw new Error('no complete sidx index in the file head');
     }
   }
+}
+
+// VerifiedFile.read checks its signal only between fetches, and its lazy
+// memoized open ignores callers' signals entirely, so a host that never
+// answers would pin the read past an abort — race the signal so the promise
+// rejects the moment it fires (the stray fetch is left to the browser).
+function abortableRead(vf, offset, length, signal) {
+  if (signal === undefined) return vf.read(offset, length);
+  const aborted = new Promise((_, reject) => {
+    signal.addEventListener('abort', () => reject(new DOMException('open aborted', 'AbortError')), { once: true });
+  });
+  return Promise.race([vf.read(offset, length, { signal }), aborted]);
 }
 
 // Per-configured-base request/byte counters, fed by the fetchFn seam. Bytes

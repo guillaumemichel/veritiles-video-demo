@@ -1,0 +1,50 @@
+{
+  "videos": {
+    "YE7VzlLtp-4": {
+      "title": "Big Buck Bunny",
+      "channel": "Blender",
+      "channelId": "UCSMOQeBJ2RAnuFungnQOxLg",
+      "url": "https://www.youtube.com/watch?v=YE7VzlLtp-4",
+      "license": "CC-BY-3.0",
+      "licenseSource": "operator",
+      "youtubeLicense": null,
+      "uploadDate": "20080529",
+      "durationSeconds": 597,
+      "tracks": {
+        "136": {
+          "kind": "video",
+          "codecs": "avc1.4d401f",
+          "size": 75024681,
+          "sha256": "91100c44d43befdc3a2ca3b50d90d43ed4973fdf29f1aa3c04a9a34e52d1babf",
+          "durationSeconds": 596.4583333333334,
+          "anchor": "bafyreibyxk54zdekc46klj3p3ng2voex5nce6zxrv3nwmklc2ala7pkkqq",
+          "mirrors": [
+            "https://github.com/guillaumemichel/veritiles-video-demo/releases/download/yt-YE7VzlLtp-4/itag136.mp4"
+          ]
+        },
+        "140": {
+          "kind": "audio",
+          "codecs": "mp4a.40.2",
+          "size": 9655276,
+          "sha256": "c1ae25d8d2a663a719b325e17c76c248f7add55d04828bcbe067912764d575cb",
+          "durationSeconds": 596.520634920635,
+          "anchor": "bafyreidjbe36f4elqlh3kac4z2qegsje64kjll5z4d7vhceu5n74mrg23a",
+          "mirrors": [
+            "https://github.com/guillaumemichel/veritiles-video-demo/releases/download/yt-YE7VzlLtp-4/itag140.mp4"
+          ]
+        }
+      },
+      "recipe": [
+        "yt-dlp --ignore-config --js-runtimes node -f 136 --fixup never -o itag136.mp4 'https://www.youtube.com/watch?v=YE7VzlLtp-4'",
+        "sha256sum itag136.mp4",
+        "yt-dlp --ignore-config --js-runtimes node -f 140 --fixup never -o itag140.mp4 'https://www.youtube.com/watch?v=YE7VzlLtp-4'",
+        "sha256sum itag140.mp4"
+      ],
+      "tools": {
+        "yt-dlp": "2026.08.19"
+      },
+      "ingestedAt": "2026-09-06",
+      "generation": 1
+    }
+  }
+}

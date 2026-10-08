@@ -5,23 +5,35 @@
 // the tamper alert while playback keeps running, a custom cross-origin
 // source plays whether it arrives by query string or through the form, a
 // wrong anchor fails loudly without playing a frame, a preset picked while
-// another source is still opening wins the hand-off cleanly, and the select
-// follows hand-edited fields without loading anything.
+// another source is still opening wins the hand-off cleanly, the select
+// follows hand-edited fields without loading anything, a video + audio
+// track pair (the YouTube itag shape, served from a second origin) plays
+// through two SourceBuffers, and a YouTube preset, when the build has one,
+// survives a tampered track.
 //
 //   node scripts/serve.mjs dist &
 //   node scripts/browser-check.mjs [url]
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { ensureSplitFixture } from './lib/split-fixture.js';
+import { serve } from './serve.mjs';
 
 const url = process.argv[2] ?? 'http://127.0.0.1:8080/';
 const CHROMIUM = process.env.CHROMIUM ?? 'chromium';
 const CODECS = 'avc1.640029, mp4a.40.2';
 const VERIFY_FAILED = "⛔ the bytes at this URL don't verify against the anchor CID";
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 async function main() {
   const profile = await mkdtemp(join(tmpdir(), 'veritiles-check-'));
+  const fixture = await ensureSplitFixture(join(repoRoot, 'data'));
+  const fixtureServer = await serve(fixture.dir);
+  const fixtureBase = `http://127.0.0.1:${fixtureServer.address().port}/`;
+  const pair = fixture.tracks.map((t) => ({ cid: t.cid, src: new URL(t.file, fixtureBase).href }));
   const browser = spawn(CHROMIUM, [
     '--headless=new', '--remote-debugging-port=0', '--no-first-run',
     '--autoplay-policy=no-user-gesture-required', `--user-data-dir=${profile}`,
@@ -37,9 +49,13 @@ async function main() {
     await checkFormPath(cdp, anchor, src);
     await checkOpeningHandOff(cdp, anchor, src);
     await checkSelectFollowsFields(cdp);
+    await checkTrackPair(cdp, pair);
+    await checkTrackPairWrongAnchor(cdp, pair);
+    await checkYoutubePreset(cdp);
     console.log('browser check OK');
   } finally {
     browser.kill();
+    fixtureServer.close();
     await new Promise((resolve) => {
       const timer = setTimeout(resolve, 3000);
       browser.once('exit', () => { clearTimeout(timer); resolve(); });
@@ -58,6 +74,7 @@ async function checkDefaultPreset(cdp) {
     throw new Error(`honest playback showed rejections: ${JSON.stringify(playing)}`);
   }
   expect(playing.search === '' && !playing.toggleHidden, 'the default preset should leave the URL alone and offer the toggle', playing);
+  expect(playing.originHidden, 'a local preset has no YouTube origin panel', playing);
   console.log(`honest mirror: playing at ${playing.time.toFixed(1)}s — ${playing.counters}`);
 
   await page.evaluate(`document.getElementById('evilToggle').click(); 'ok'`);
@@ -67,13 +84,21 @@ async function checkDefaultPreset(cdp) {
   const after = await page.until('playback to continue past the ban', (s) => s.time > before + 1);
   console.log(`failover: playback advanced ${before.toFixed(1)}s → ${after.time.toFixed(1)}s`);
 
+  await seekAndScrub(page);
+  expectNoPageErrors(cdp);
+  const anchor = await page.evaluate(`document.getElementById('cid').value`);
+  await page.close();
+  return anchor;
+}
+
+// A seek, then a scrub burst: rapid seeks race the in-flight segment read; a
+// stale read must be aborted, never appended past the new target (else the
+// target segment is skipped and playback stalls in the gap).
+async function seekAndScrub(page) {
   await page.evaluate(`document.getElementById('video').currentTime = 300; 'ok'`);
   const sought = await page.until('playback after seeking to 300s', (s) => s.time > 301 && s.time < 330);
   console.log(`seek: playing at ${sought.time.toFixed(1)}s — ${sought.counters}`);
 
-  // Scrub burst: rapid seeks race the in-flight segment read; a stale read
-  // must be aborted, never appended past the new target (else the target
-  // segment is skipped and playback stalls in the gap).
   const final = await page.evaluate(`(async () => {
     const v = document.getElementById('video');
     for (let i = 0; i < 12; i++) {
@@ -84,16 +109,12 @@ async function checkDefaultPreset(cdp) {
   })()`);
   const scrubbed = await page.until('playback after a scrub burst', (s) => s.time > final + 0.5 && s.time < final + 30, 10000);
   console.log(`scrub: settled at ${final.toFixed(1)}s, playing at ${scrubbed.time.toFixed(1)}s — ${scrubbed.counters}`);
-  expectNoPageErrors(cdp);
-  const anchor = await page.evaluate(`document.getElementById('cid').value`);
-  await page.close();
-  return anchor;
 }
 
 // ?cid&src pointing at the other origin: verified playback, no tamper
 // toggle, the host named in the transfer table, codecs read off the moov.
 async function checkCustomSource(cdp, anchor, src) {
-  const page = await openPage(cdp, sourceUrl(anchor, src));
+  const page = await openPage(cdp, sourceUrl([{ cid: anchor, src }]));
   await page.evaluate(`document.getElementById('video').play(); 'ok'`);
   const playing = await page.until('verified cross-origin playback', (s) => s.time > 1 && /verified [1-9]/.test(s.counters));
   expect(!/rejected [1-9]/.test(playing.counters) && playing.alert === '', 'cross-origin playback showed rejections', playing);
@@ -107,7 +128,7 @@ async function checkCustomSource(cdp, anchor, src) {
 
 // A CID that decodes but names other bytes: the alert says so, nothing plays.
 async function checkWrongAnchor(cdp, anchor, src) {
-  const page = await openPage(cdp, sourceUrl(corruptAnchor(anchor), src));
+  const page = await openPage(cdp, sourceUrl([{ cid: corruptAnchor(anchor), src }]));
   const failed = await page.until('the verification failure', (s) => s.alert.startsWith(VERIFY_FAILED));
   expect(failed.time === 0 && failed.counters === '', 'a wrong anchor must not play', failed);
   console.log(`wrong anchor: ${failed.alert}`);
@@ -190,9 +211,78 @@ async function checkSelectFollowsFields(cdp) {
   await page.close();
 }
 
-function sourceUrl(cid, src) {
+// A video-only + audio-only track pair from a second origin, by repeated
+// cid/src query pairs: verified playback through two SourceBuffers, both
+// tracks in the transfer table and the counters, a seek and a scrub burst.
+async function checkTrackPair(cdp, pair) {
+  const page = await openPage(cdp, sourceUrl(pair));
+  await page.evaluate(`document.getElementById('video').play(); 'ok'`);
+  const playing = await page.until('dual-track playback', (s) => s.time > 1 && /verified [1-9]/.test(s.counters));
+  expect(!/rejected [1-9]/.test(playing.counters) && playing.alert === '', 'dual-track playback showed rejections', playing);
+  expect(playing.counters.includes(`codecs ${CODECS}`) && /segment \d+\/\d+ \+ \d+\/\d+/.test(playing.counters), 'the counters should show both tracks', playing);
+  const host = new URL(pair[0].src).hostname;
+  expect(['track 1 · ' + host, 'track 1 · proof files', 'track 2 · ' + host, 'track 2 · proof files'].every((l) => playing.mirrors.includes(l)), 'both tracks should be listed', playing);
+  expect(playing.preset === 'custom' && playing.toggleHidden, 'a custom track pair has no tamper toggle', playing);
+  const fieldCids = await page.evaluate(`document.getElementById('cid').value`);
+  expect(fieldCids === pair.map((t) => t.cid).join(' '), 'the CID field should list both anchors', { fieldCids });
+  console.log(`track pair: playing at ${playing.time.toFixed(1)}s — ${playing.counters}`);
+  await seekAndScrub(page);
+  expectNoPageErrors(cdp);
+  await page.close();
+}
+
+// A wrong anchor on the audio track alone: the pair fails closed.
+async function checkTrackPairWrongAnchor(cdp, pair) {
+  const [video, audio] = pair;
+  const page = await openPage(cdp, sourceUrl([video, { ...audio, cid: corruptAnchor(audio.cid) }]));
+  const failed = await page.until('the verification failure', (s) => s.alert.startsWith(VERIFY_FAILED));
+  expect(failed.time === 0 && failed.counters === '', 'a wrong anchor on one track must not play', failed);
+  console.log(`track pair, wrong audio anchor: ${failed.alert}`);
+  expectNoPageErrors(cdp);
+  await page.close();
+}
+
+// A YouTube preset, when the build has one (after yt-ingest): the origin
+// panel shows, honest playback runs, and the tamper toggle routes the evil
+// track through its malicious mirror — caught, banned, playback continues.
+async function checkYoutubePreset(cdp) {
+  const page = await openPage(cdp, url);
+  const ids = await page.evaluate(`[...document.getElementById('preset').options].map((o) => o.value).filter((v) => v.startsWith('yt-'))`);
+  if (ids.length === 0) {
+    console.log('youtube preset: none in this build — tamper failover on separate tracks not exercised (run yt-ingest)');
+    await page.close();
+    return;
+  }
+  await page.evaluate(`(() => {
+    const preset = document.getElementById('preset');
+    preset.value = ${JSON.stringify(ids[0])};
+    preset.dispatchEvent(new Event('change'));
+    return 'ok';
+  })()`);
+  await page.until('the youtube preset to open', (s) => s.preset === ids[0] && s.counters !== '');
+  await page.evaluate(`document.getElementById('video').play(); 'ok'`);
+  const playing = await page.until('youtube preset playback', (s) => s.time > 1 && /verified [1-9]/.test(s.counters));
+  expect(!playing.originHidden && !playing.toggleHidden, 'the youtube preset should show its origin panel and the toggle', playing);
+  expect(!/rejected [1-9]/.test(playing.counters) && playing.alert === '', 'youtube preset playback showed rejections', playing);
+  console.log(`youtube preset ${ids[0]}: playing at ${playing.time.toFixed(1)}s — ${playing.counters}`);
+
+  await page.evaluate(`document.getElementById('evilToggle').click(); 'ok'`);
+  const caught = await page.until('the tamper alert on a track', (s) => /Tampered/.test(s.alert) && /rejected [1-9]/.test(s.counters));
+  const before = caught.time;
+  const after = await page.until('playback to continue past the track ban', (s) => s.time > before + 1);
+  console.log(`youtube preset tampered track: ${caught.counters}; playback ${before.toFixed(1)}s → ${after.time.toFixed(1)}s`);
+  expectNoPageErrors(cdp);
+  await page.close();
+}
+
+function sourceUrl(tracks) {
   const page = new URL(url);
-  page.search = new URLSearchParams({ cid, src }).toString();
+  const params = new URLSearchParams();
+  for (const { cid, src } of tracks) {
+    params.append('cid', cid);
+    params.append('src', src);
+  }
+  page.search = params.toString();
   return page.href;
 }
 
@@ -288,6 +378,7 @@ function pageHelpers(cdp, sessionId, targetId) {
     alert: document.getElementById('alert').hidden ? '' : document.getElementById('alert').textContent,
     mirrors: [...document.querySelectorAll('#mirrors tr')].map((tr) => tr.cells[0].textContent),
     toggleHidden: document.getElementById('toggle').hidden,
+    originHidden: document.getElementById('origin').hidden,
     preset: document.getElementById('preset').value,
     search: location.search,
   })`);

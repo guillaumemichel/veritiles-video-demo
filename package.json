@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test 'test/**/*.test.js'",
+    "test": "node --test --test-timeout=10000 'test/**/*.test.js'",
     "test:browser": "node scripts/browser-check.mjs",
     "prepare-video": "node scripts/prepare-video.mjs",
     "build": "node scripts/build.mjs",
-    "serve": "node scripts/serve.mjs dist"
+    "serve": "node scripts/serve.mjs dist",
+    "yt-ingest": "node scripts/yt-ingest.mjs",
+    "watchtower": "node scripts/watchtower.mjs"
   },
   "dependencies": {
     "multiformats": "14.0.4",

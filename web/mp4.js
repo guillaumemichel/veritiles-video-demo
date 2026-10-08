@@ -4,6 +4,9 @@
 // fragment, and derive the MSE codecs string from the `moov` sample entries.
 // Runs unchanged in the browser and in node (build checks, tests).
 
+// The player's bound on where the global sidx may end.
+export const HEAD_MAX = 8 * 1024 * 1024;
+
 // bytes: the file head, from offset 0. Returns null when the head is too
 // short to reach a complete sidx (caller reads more and retries); throws on
 // streams this player cannot use.
@@ -231,6 +234,21 @@ function readDescriptor(bytes, pos, end, tag) {
 
 function hex(byte) {
   return byte.toString(16).padStart(2, '0');
+}
+
+// Everything the player learns from a file head: the segment index and the
+// codecs. Null while the head is too short for a complete sidx — the moov
+// that precedes it is then complete by construction.
+export function parseHead(bytes) {
+  const index = parseIndex(bytes);
+  return index === null ? null : { index, codecs: parseCodecs(bytes) };
+}
+
+// The MSE content type for a codecs string: an audio-only track is
+// `audio/mp4`, anything carrying video is `video/mp4`.
+export function mimeType(codecs) {
+  const audioOnly = codecs.split(', ').every((codec) => codec.startsWith('mp4a'));
+  return `${audioOnly ? 'audio' : 'video'}/mp4; codecs="${codecs}"`;
 }
 
 // The last segment whose start time is at or before t (first segment when t

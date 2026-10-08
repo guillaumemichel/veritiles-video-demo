@@ -4,32 +4,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { parseCodecs, parseIndex, segmentAt } from '../web/mp4.js';
+import { mimeType, parseCodecs, parseHead, parseIndex, segmentAt } from '../web/mp4.js';
+import {
+  BBB_AVCC, BBB_ESDS, audioEntry, bbbAudioTrak, bbbVideoTrak, box, esds, fromHex, ftyp, movie, sidx, trak, u16, u32, visualEntry, zeros,
+} from './lib/bmff.js';
 
-function u16(value) { return [value >> 8, value & 0xff]; }
-function u32(value) { return [value >>> 24, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff]; }
-function u64(value) { return [...u32(Math.floor(value / 2 ** 32)), ...u32(value % 2 ** 32)]; }
-
-function box(type, ...parts) {
-  const payload = parts.flat();
-  return [...u32(8 + payload.length), ...[...type].map((c) => c.charCodeAt(0)), ...payload];
-}
-
-function sidx({ version = 1, timescale, earliest, firstOffset, refs }) {
-  const wide = version === 1 ? u64 : u32;
-  return box('sidx',
-    [version, 0, 0, 0], // version + flags
-    u32(1), // reference_ID
-    u32(timescale),
-    wide(earliest), wide(firstOffset),
-    u16(0), u16(refs.length),
-    refs.flatMap(({ size, duration, hierarchical = false }) => [
-      ...u32(((hierarchical ? 1 : 0) << 31 >>> 0) | size), ...u32(duration), ...u32(0),
-    ]),
-  );
-}
-
-const ftyp = box('ftyp', [...'isom'].map((c) => c.charCodeAt(0)));
 const moov = box('moov', new Array(20).fill(0));
 const initEnd = ftyp.length + moov.length;
 
@@ -89,61 +68,35 @@ test('segmentAt picks the covering segment', () => {
   assert.equal(segmentAt(segments, 100), 2);
 });
 
+// --- head + content type -----------------------------------------------------
+
+test('parseHead yields index and codecs together, null while the sidx is short', () => {
+  const track = sidx({ timescale: 1000, earliest: 0, firstOffset: 0, refs: [{ size: 10, duration: 1000 }] });
+  const bytes = Uint8Array.from([...movie(bbbVideoTrak), ...track, ...zeros(10)]);
+  const head = parseHead(bytes);
+  assert.equal(head.codecs, 'avc1.640029');
+  assert.equal(head.index.segments.length, 1);
+  assert.equal(parseHead(bytes.subarray(0, bytes.length - 12)), null);
+});
+
+test('mimeType picks audio/mp4 only for audio-only codecs', () => {
+  assert.equal(mimeType('mp4a.40.2'), 'audio/mp4; codecs="mp4a.40.2"');
+  assert.equal(mimeType('avc1.640029'), 'video/mp4; codecs="avc1.640029"');
+  assert.equal(mimeType('avc1.640029, mp4a.40.2'), 'video/mp4; codecs="avc1.640029, mp4a.40.2"');
+});
+
 // --- codecs ------------------------------------------------------------------
 
-function zeros(n) { return new Array(n).fill(0); }
-function fromHex(hex) { return [...Buffer.from(hex, 'hex')]; }
-
-// avcC and esds exactly as ffmpeg wrote them for the demo's Big Buck Bunny
-// file (H.264 High@4.1 + AAC-LC); ffprobe reports `avc1.640029, mp4a.40.2`.
-const BBB_AVCC = '000000336176634301640029ffe1001b67640029acca501e0089f970110000030001000003003c8f18319601000568e93b2c8b';
-const BBB_ESDS = '0000003665736473000000000380808025000200048080801740150000000001f4000001f4000580808005119056e500068080800102';
-
-// tag + length (ffmpeg's 4-byte 0x80-padded form, or the minimal single byte) + payload
-function descriptor(tag, payload, { wide = true } = {}) {
-  const length = wide ? [0x80, 0x80, 0x80, payload.length] : [payload.length];
-  return [tag, ...length, ...payload];
-}
-
-function esds({ objectType = 0x40, audioSpecificConfig = [0x11, 0x90, 0x56, 0xe5, 0x00], wide = true, esFields = [...u16(2), 0] } = {}) {
-  const form = { wide };
-  const info = descriptor(0x05, audioSpecificConfig, form);
-  const decoderConfig = descriptor(0x04, [objectType, 0x15, 0, 0, 0, ...u32(128000), ...u32(128000), ...info], form);
-  const slConfig = descriptor(0x06, [0x02], form);
-  const es = descriptor(0x03, [...esFields, ...decoderConfig, ...slConfig], form);
-  return box('esds', [0, 0, 0, 0], es);
-}
-
-function visualEntry(type, ...children) {
-  return box(type, zeros(78), ...children);
-}
-
-function audioEntry({ version = 0, children = [] } = {}) {
-  const fields = version === 1 ? 44 : 28;
-  return box('mp4a', zeros(8), u16(version), zeros(fields - 10), children);
-}
-
-function trak(entry) {
-  return box('trak', box('mdia', box('minf', box('stbl', box('stsd', [0, 0, 0, 0], u32(1), entry)))));
-}
-
-function movie(...traks) {
-  return Uint8Array.from([...ftyp, ...box('moov', box('mvhd', zeros(100)), ...traks)]);
-}
-
-const bbbVideo = trak(visualEntry('avc1', fromHex(BBB_AVCC)));
-const bbbAudio = trak(audioEntry({ children: fromHex(BBB_ESDS) }));
-
 test('derives the BBB codecs string from the real avcC and esds boxes', () => {
-  assert.equal(parseCodecs(movie(bbbVideo, bbbAudio)), 'avc1.640029, mp4a.40.2');
+  assert.equal(parseCodecs(movie(bbbVideoTrak, bbbAudioTrak)), 'avc1.640029, mp4a.40.2');
 });
 
 test('lists codecs in trak order', () => {
-  assert.equal(parseCodecs(movie(bbbAudio, bbbVideo)), 'mp4a.40.2, avc1.640029');
+  assert.equal(parseCodecs(movie(bbbAudioTrak, bbbVideoTrak)), 'mp4a.40.2, avc1.640029');
 });
 
 test('returns null until the moov is fully buffered', () => {
-  const bytes = movie(bbbVideo, bbbAudio);
+  const bytes = movie(bbbVideoTrak, bbbAudioTrak);
   assert.equal(parseCodecs(bytes.subarray(0, 4)), null);
   assert.equal(parseCodecs(bytes.subarray(0, ftyp.length + 8)), null);
   assert.equal(parseCodecs(bytes.subarray(0, bytes.length - 1)), null);

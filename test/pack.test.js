@@ -7,57 +7,18 @@ import { test } from 'node:test';
 import { VerifiedFile } from 'veritiles';
 
 import { packFixed } from '../scripts/lib/pack-fixed.js';
+import { MiB, memFetch, pseudoRandom, tampered } from './lib/track-fixture.js';
 
-const MiB = 1 << 20;
 const GOOD = 'mem://good/file';
 const EVIL = 'mem://evil/file';
 const PROOFS = 'mem://proofs';
-
-function pseudoRandom(size, seed = 1) {
-  const out = new Uint8Array(size);
-  let x = seed >>> 0 || 1;
-  for (let i = 0; i < size; i++) {
-    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
-    out[i] = x & 0xff;
-  }
-  return out;
-}
-
-// A fetch over in-memory bytes: plain GETs for proof files, single-Range 206
-// for content — the same dumb-host shape the real servers answer with.
-function memFetch({ files, proofs }) {
-  return async (input, init) => {
-    const url = String(input);
-    if (url.startsWith(`${PROOFS}/`)) {
-      const body = proofs.get(url.slice(PROOFS.length + 1));
-      if (body === undefined) return new Response('not found', { status: 404 });
-      return new Response(new Uint8Array(body), { status: 200 });
-    }
-    const content = files.get(url);
-    if (content === undefined) return new Response('not found', { status: 404 });
-    const range = init?.headers?.Range ?? init?.headers?.range;
-    const match = range === undefined ? null : /^bytes=(\d+)-(\d+)$/.exec(range);
-    if (!match) return new Response(new Uint8Array(content), { status: 200 });
-    const start = Number(match[1]);
-    const end = Math.min(Number(match[2]) + 1, content.length);
-    return new Response(new Uint8Array(content.subarray(start, end)), { status: 206 });
-  };
-}
-
-function tampered(content) {
-  const evil = new Uint8Array(content);
-  for (let offset = 0; offset < evil.length; offset += MiB) {
-    evil[offset + Math.floor(Math.min(MiB, evil.length - offset) / 2)] ^= 0xff;
-  }
-  return evil;
-}
 
 function open(packed, files) {
   return new VerifiedFile({
     cid: packed.anchor,
     source: [...files.keys()],
     proof: PROOFS,
-    fetchFn: memFetch({ files, proofs: packed.proofs }),
+    fetchFn: memFetch({ files, proofs: new Map([[PROOFS, packed.proofs]]) }),
   });
 }
 

@@ -14,7 +14,7 @@
     main { width: min(960px, 100%); }
     h1 { font-size: 22px; margin: 0 0 4px; }
     .lede { margin: 0 0 16px; color: #9aa7b2; }
-    .lede a, footer a, details a { color: #7fb4e8; }
+    .lede a, footer a, details a, #origin a { color: #7fb4e8; }
     #source { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
     #source select, #source input, #source button {
       background: #171d24; color: #d7dde3; border: 1px solid #232c36; border-radius: 6px;
@@ -26,7 +26,7 @@
     .hint { margin: 0 0 12px; color: #7c8894; font-size: 13px; }
     .hint code { color: #b8c4cf; }
     video { width: 100%; background: #000; border-radius: 8px; display: block; }
-    #panel {
+    #panel, #origin {
       margin-top: 12px; background: #171d24; border: 1px solid #232c36;
       border-radius: 8px; padding: 12px 16px; font-family: ui-monospace, monospace; font-size: 13px;
     }
@@ -44,6 +44,10 @@
       margin: 10px 0 0; padding: 8px 12px; border-radius: 6px; border: 1px solid #7a3b38;
       background: #2a1917; color: #e8a29e; font-family: system-ui, sans-serif;
     }
+    #origin p { margin: 0 0 8px; font-family: system-ui, sans-serif; }
+    #originMeta { color: #9aa7b2; }
+    #origin details { margin: 0; }
+    #origin pre { margin: 8px 0 0; padding: 8px 10px; background: #101418; border-radius: 6px; overflow-x: auto; }
     details { margin-top: 16px; color: #9aa7b2; }
     details summary { cursor: pointer; color: #d7dde3; }
     footer { margin-top: 24px; color: #66727d; font-size: 13px; }
@@ -54,21 +58,23 @@
     <h1>Verified video from an untrusted host</h1>
     <p class="lede">
       This player streams video — Big Buck Bunny by default — over plain HTTP
-      range requests and cryptographically verifies every byte against a single
-      <a href="https://github.com/guillaumemichel/veritiles">veritiles</a> anchor CID
+      range requests and cryptographically verifies every byte against
+      <a href="https://github.com/guillaumemichel/veritiles">veritiles</a> anchor CIDs
       before the decoder sees it. The host is untrusted: flip the switch below to
       route reads through a mirror serving tampered bytes — they are caught,
-      counted, and never rendered.
+      counted, and never rendered. A video can also be the pristine tracks YouTube
+      serves, pinned by anchors anyone can re-derive from the YouTube URL.
     </p>
     <form id="source" novalidate>
       <select id="preset" aria-label="source"></select>
-      <input id="cid" aria-label="anchor CID" placeholder="anchor CID" spellcheck="false" autocomplete="off">
-      <input id="src" type="url" aria-label="video URL" placeholder="https://host/video.mp4" spellcheck="false" autocomplete="off">
+      <input id="cid" aria-label="anchor CID" placeholder="anchor CID (one per track)" spellcheck="false" autocomplete="off">
+      <input id="src" aria-label="video URL" placeholder="https://host/video.mp4 (one per track)" spellcheck="false" autocomplete="off">
       <button id="load" type="submit">Load</button>
     </form>
     <p class="hint">
       Paste any anchor CID and the URL of a file packed with veritiles; proofs are
-      read from <code>&lt;url&gt;.proofs/</code>.
+      read from <code>&lt;url&gt;.proofs/</code>. Separate video and audio tracks
+      (YouTube itags) take one CID and one URL each, whitespace-separated.
     </p>
     <video id="video" controls playsinline></video>
     <section id="panel">
@@ -83,27 +89,45 @@
       <div id="counters"></div>
       <p id="alert" hidden></p>
     </section>
+    <section id="origin" hidden>
+      <p>Original: <a id="originLink" target="_blank" rel="noopener"></a> <span id="originMeta"></span></p>
+      <details>
+        <summary>Reproduce these CIDs yourself</summary>
+        <pre id="recipe"></pre>
+        <p>Or spot-check that YouTube still serves these bytes: <code>npm run watchtower</code>
+        in <a href="https://github.com/guillaumemichel/veritiles-video-demo">this repository</a>
+        reads random leaves from YouTube and verifies them against the anchors.</p>
+      </details>
+    </section>
     <details>
       <summary>How it works</summary>
       <p>
-        The page ships one trust input: the anchor CID in the field above. The
-        video's proof — a tiny descriptor plus a shard of leaf digests — is a
-        directory of static files beside it (<code>&lt;url&gt;.proofs/</code>);
+        The page ships one trust input per track: the anchor CID in the field
+        above. A track's proof — a tiny descriptor plus a shard of leaf digests —
+        is a directory of static files beside it (<code>&lt;url&gt;.proofs/</code>);
         the client fetches only the pieces covering what it reads and verifies
         each 1&nbsp;MiB leaf with WebCrypto sha2-256 before use. From the first
         verified leaf the player reads the codecs off the fragmented MP4's
         <code>moov</code> and the segment list off its global <code>sidx</code>,
-        then streams moof/mdat segments into Media Source Extensions with
-        ~30&nbsp;s of buffer ahead; seeking jumps the read cursor. A source whose
-        bytes fail verification is dropped for the rest of the session and the
-        next one takes over.
+        then streams moof/mdat segments into Media Source Extensions — one
+        SourceBuffer per track — with ~30&nbsp;s of buffer ahead; seeking jumps
+        every read cursor. A source whose bytes fail verification is dropped for
+        the rest of the session and the next one takes over.
+      </p>
+      <p>
+        A YouTube video's tracks are the exact bytes YouTube serves for an itag
+        (downloaded with <code>yt-dlp --fixup never</code>, no re-muxing), so
+        their anchors are reproducible by anyone from the YouTube URL; the
+        watchtower reads random leaves from YouTube itself and verifies them
+        against those anchors.
       </p>
     </details>
     <footer>
       Video: <a href="https://peach.blender.org/">Big Buck Bunny</a>
       © 2008 Blender Foundation / bigbuckbunny.org,
       <a href="https://creativecommons.org/licenses/by/3.0/">CC-BY 3.0</a>
-      (remuxed to fragmented MP4, AC-3 track dropped) ·
+      (remuxed to fragmented MP4, AC-3 track dropped; YouTube presets are the
+      Blender Foundation's own upload, served as-is) ·
       <a href="https://github.com/guillaumemichel/veritiles-video-demo">source</a>
     </footer>
   </main>

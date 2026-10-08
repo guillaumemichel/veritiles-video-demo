@@ -1,8 +1,12 @@
 #!/usr/bin/env node
-// Produce data/bbb.mp4 (fragmented MP4 with a global sidx) and data/bbb.json
-// (its MSE codec string and shape) from the Blender Foundation's Big Buck
-// Bunny release. Idempotent: skips everything once the outputs exist, so CI
-// caches data/ and rebuilds touch nothing. Requires ffmpeg/ffprobe and unzip.
+// Fill data/: bbb.mp4 (fragmented MP4 with a global sidx) plus bbb.json (its
+// MSE codec string and shape) from the Blender Foundation's Big Buck Bunny
+// release, and every YouTube track yt-index.json names, fetched from its
+// mirrors — YouTube bot-checks CI runners, so yt-ingest (yt-dlp) is the
+// residential path and mirrors are the CI path; either way the bytes must
+// hash to what the index records. Idempotent: outputs that exist and match
+// are left alone, so CI caches data/ and rebuilds touch nothing. Requires
+// ffmpeg/ffprobe and unzip.
 import { spawnSync } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { access, mkdir, rm, stat, writeFile } from 'node:fs/promises';
@@ -10,6 +14,9 @@ import { dirname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+
+import { ensureTrackFile } from './lib/tracks.js';
+import { INDEX_FILE, readIndex, trackFile } from './lib/yt-index.js';
 
 const ZIP_URL = 'https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip';
 const SOURCE_NAME = 'bbb_sunflower_1080p_30fps_normal.mp4';
@@ -25,7 +32,8 @@ const FFMPEG_ARGS = [
   '-min_frag_duration', '2000000',
 ];
 
-const dataDir = join(resolve(dirname(fileURLToPath(import.meta.url)), '..'), 'data');
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const dataDir = join(repoRoot, 'data');
 const zipPath = join(dataDir, 'bbb.zip');
 const sourcePath = join(dataDir, SOURCE_NAME);
 const videoPath = join(dataDir, 'bbb.mp4');
@@ -33,8 +41,13 @@ const metaPath = join(dataDir, 'bbb.json');
 
 async function main() {
   await mkdir(dataDir, { recursive: true });
+  await prepareBbb();
+  await prepareYoutubeTracks();
+}
+
+async function prepareBbb() {
   if (await exists(videoPath) && await exists(metaPath)) {
-    console.log(`data/bbb.mp4 and data/bbb.json exist — nothing to do`);
+    console.log('data/bbb.mp4 and data/bbb.json exist — nothing to do');
     return;
   }
   if (!(await exists(sourcePath))) {
@@ -48,6 +61,17 @@ async function main() {
   await rm(zipPath, { force: true });
   await rm(sourcePath, { force: true });
   console.log(`data/bbb.mp4 ready (${(await stat(videoPath)).size} bytes)`);
+}
+
+async function prepareYoutubeTracks() {
+  const index = await readIndex(join(repoRoot, INDEX_FILE));
+  for (const [id, entry] of Object.entries(index.videos)) {
+    for (const [itag, track] of Object.entries(entry.tracks)) {
+      const rel = `data/yt/${id}/${trackFile(itag)}`;
+      const from = await ensureTrackFile(join(repoRoot, rel), track);
+      console.log(`${rel}: ${from}`);
+    }
+  }
 }
 
 async function download(url, path) {

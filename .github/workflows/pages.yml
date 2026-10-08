@@ -1,7 +1,10 @@
 # Build the demo and publish it to GitHub Pages. Only source is committed;
 # the video is fetched from the Blender Foundation mirror, remuxed, packed,
-# and verified here on every deploy. data/ (the remuxed video) is cached so
-# the 263 MB download and the remux run only when the pipeline changes.
+# and verified here on every deploy, and the YouTube tracks yt-index.json
+# names are fetched from their mirrors (YouTube bot-checks runner IPs, so
+# yt-dlp never runs here) and checked against the digests the index commits
+# to. The remux is cached until prepare-video changes, the YouTube tracks
+# until the index does.
 name: Deploy demo to GitHub Pages
 
 on:
@@ -30,10 +33,21 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Exact key, no fallback: prepare-video keeps any bbb.mp4 it finds, so
+      # an older cache would deploy a remux made by an older pipeline.
       - uses: actions/cache@v4
         with:
-          path: data
-          key: video-${{ hashFiles('scripts/prepare-video.mjs') }}
+          path: |
+            data/bbb.mp4
+            data/bbb.json
+          key: bbb-${{ hashFiles('scripts/prepare-video.mjs') }}
+      # Every track is checked against the index's sha256, so an older cache
+      # is a safe start: an index edit re-fetches only what changed.
+      - uses: actions/cache@v4
+        with:
+          path: data/yt
+          key: yt-${{ hashFiles('yt-index.json') }}
+          restore-keys: yt-
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg unzip
       - run: npm run prepare-video
       - run: npm run build # packs, assembles dist/, and verifies it through the released client

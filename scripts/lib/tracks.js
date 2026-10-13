@@ -9,13 +9,13 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 import { HEAD_MAX, mimeType, parseHead } from '../../web/mp4.js';
-import { DEFAULT_CHUNK as LEAF, packFixed } from './pack-fixed.js';
+import { mp4Leaves, packMp4 } from './pack-mp4.js';
 
 // The file read, described and packed:
 // { bytes, size, sha256, codecs, kind, durationSeconds, segments, anchor, map, proofs, leafCount }.
 export async function packTrack(path) {
   const bytes = new Uint8Array(await readFile(path));
-  const packed = packFixed(bytes);
+  const packed = await packMp4(bytes);
   return { bytes, ...describeTrack(bytes), sha256: sha256Hex(bytes), anchor: packed.anchor, map: packed.mapCid, proofs: packed.proofs, leafCount: packed.leafCount };
 }
 
@@ -39,13 +39,11 @@ function trackShape({ index, codecs }, size) {
   };
 }
 
-// A copy with one flipped byte in the middle of every 1 MiB leaf — the
-// malicious mirror: whatever a reader takes from it first fails verification.
+// A copy with one flipped byte in the middle of every leaf — the malicious
+// mirror: whatever a reader takes from it first fails verification.
 export function tampered(bytes) {
   const evil = new Uint8Array(bytes);
-  for (let offset = 0; offset < evil.length; offset += LEAF) {
-    evil[offset + Math.floor(Math.min(LEAF, evil.length - offset) / 2)] ^= 0xff;
-  }
+  for (const { offset, length } of mp4Leaves(bytes)) evil[offset + Math.floor(length / 2)] ^= 0xff;
   return evil;
 }
 

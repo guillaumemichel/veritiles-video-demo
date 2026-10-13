@@ -1,8 +1,10 @@
 // A synthetic single-track file shaped like a YouTube DASH itag: ftyp, a
 // moov carrying one avc1 or mp4a sample entry, a global sidx, then the
-// fragments' bytes (pseudo-random — nothing here decodes them, they only
-// have to be exactly what the index says). Deterministic for a given seed.
-import { bbbAudioTrak, bbbVideoTrak, ftyp, moov, sidx } from './bmff.js';
+// fragments, each a moof and an mdat box around pseudo-random bytes —
+// nothing here decodes them, they only have to be exactly what the index
+// says and walk as top-level boxes, the way the packer cuts them.
+// Deterministic for a given seed.
+import { ascii, bbbAudioTrak, bbbVideoTrak, ftyp, moov, sidx, u32 } from './bmff.js';
 
 export { tampered } from '../../scripts/lib/tracks.js';
 
@@ -31,6 +33,8 @@ export function seededRandom(seed = 1) {
   return () => next() / 2 ** 32;
 }
 
+const MOOF_SIZE = 16;
+
 // { bytes, size, codecs, segments } for a track of `segments` fragments of
 // `segmentSize` bytes, `segmentSeconds` each.
 export function syntheticTrack({ kind = 'video', segments = 4, segmentSize = MiB - 1234, segmentSeconds = 5, seed = 1 } = {}) {
@@ -38,6 +42,10 @@ export function syntheticTrack({ kind = 'video', segments = 4, segmentSize = MiB
   const refs = Array.from({ length: segments }, () => ({ size: segmentSize, duration: segmentSeconds * timescale }));
   const head = [...ftyp, ...moov(kind === 'audio' ? bbbAudioTrak : bbbVideoTrak), ...sidx({ timescale, earliest: 0, firstOffset: 0, refs })];
   const media = pseudoRandom(segments * segmentSize, seed);
+  for (let offset = 0; offset < media.length; offset += segmentSize) {
+    media.set([...u32(MOOF_SIZE), ...ascii('moof')], offset);
+    media.set([...u32(segmentSize - MOOF_SIZE), ...ascii('mdat')], offset + MOOF_SIZE);
+  }
   const bytes = new Uint8Array(head.length + media.length);
   bytes.set(head, 0);
   bytes.set(media, head.length);

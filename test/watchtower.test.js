@@ -1,21 +1,21 @@
 // The watchtower machinery against an in-memory "YouTube": honest bytes
-// match, tampered bytes are a mismatch (even when a retry then fails for
-// another reason), a missing delivery is unavailable, probes land on
-// distinct mid-file leaves, and no signed delivery URL — nor the IP it is
-// bound to — reaches the terminal.
+// match, tampered bytes are a mismatch, a missing delivery is unavailable,
+// probes land on distinct mid-file MiB and verify the whole leaf covering
+// each, and no signed delivery URL — nor the IP it is bound to — reaches
+// the terminal.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { packFixed } from '../scripts/lib/pack-fixed.js';
-import { LEAF, probeLeaf, probeOffsets, probeTrack, rootMessage } from '../scripts/lib/watchtower.js';
+import { mp4Leaves, packMp4 } from '../scripts/lib/pack-mp4.js';
+import { MiB, probeLeaf, probeOffsets, probeTrack, rootMessage } from '../scripts/lib/watchtower.js';
 import { memFetch, seededRandom, syntheticTrack, tampered } from './lib/track-fixture.js';
 
 // Signed like a real delivery: bound to the resolving IP (a documentation address).
 const SOURCE = 'https://rr1---sn-test.googlevideo.example/videoplayback?itag=137&expire=1&ip=203.0.113.7&sig=x';
 const PROOF = 'https://site.example/yt/v/itag137.mp4.proofs';
 
-const track = syntheticTrack({ segments: 5, seed: 3 }); // 5 leaves, the last partial
-const packed = packFixed(track.bytes);
+const track = syntheticTrack({ segments: 5, seed: 3 }); // an init leaf, then 5 fragments of just under a MiB
+const packed = await packMp4(track.bytes);
 const proofs = new Map([[PROOF, packed.proofs]]);
 const settings = (bytes) => ({
   cid: packed.anchor,
@@ -24,16 +24,16 @@ const settings = (bytes) => ({
   fetchFn: memFetch({ files: bytes ? new Map([[SOURCE, bytes]]) : new Map(), proofs }),
 });
 
-test('probe offsets are distinct, leaf-aligned and mid-file', () => {
-  const offsets = probeOffsets(10 * LEAF + 5, 3, seededRandom(1));
+test('probe offsets are distinct, MiB-aligned and mid-file', () => {
+  const offsets = probeOffsets(10 * MiB + 5, 3, seededRandom(1));
   assert.equal(offsets.length, 3);
   assert.deepEqual(offsets, [...new Set(offsets)].sort((a, b) => a - b));
   for (const offset of offsets) {
-    assert.equal(offset % LEAF, 0);
-    assert.ok(offset >= LEAF && offset <= 9 * LEAF, `offset ${offset} outside the mid-file leaves`);
+    assert.equal(offset % MiB, 0);
+    assert.ok(offset >= MiB && offset <= 9 * MiB, `offset ${offset} outside the mid-file MiB`);
   }
-  assert.deepEqual(probeOffsets(LEAF - 1, 3), [0], 'a one-leaf file has only its head to probe');
-  assert.equal(probeOffsets(4 * LEAF, 3).length, 2, 'k clamps to the mid-file leaves available');
+  assert.deepEqual(probeOffsets(MiB - 1, 3), [0], 'a file within one MiB has only its head to probe');
+  assert.equal(probeOffsets(4 * MiB, 3).length, 2, 'k clamps to the mid-file MiB available');
 });
 
 test('honest bytes match on every probe, with each proof file fetched once', async () => {
@@ -43,10 +43,7 @@ test('honest bytes match on every probe, with each proof file fetched once', asy
   const { size, probes } = await probeTrack({ ...settings(track.bytes), fetchFn, k: 3, random: seededRandom(5) });
   assert.equal(size, track.size);
   assert.equal(probes.length, 3);
-  for (const probe of probes) {
-    assert.equal(probe.result, 'match');
-    assert.equal(probe.bytes, LEAF);
-  }
+  for (const probe of probes) assert.equal(probe.result, 'match');
   assert.equal(proofFetches, packed.proofs.size, 'root and the shard, once each');
 });
 
@@ -56,21 +53,18 @@ test('tampered bytes are a mismatch on every probe, each judged on its own', asy
   assert.match(probes[0].detail, /digest mismatch/);
 });
 
-test('bytes rejected before the delivery went away still count as a mismatch', async () => {
-  // First ranged answer: wrong bytes (rejected); the verified retry: 404.
-  let ranged = 0;
-  const honest = settings(tampered(track.bytes)).fetchFn;
-  const fetchFn = (input, init) => {
-    if (String(input) === SOURCE && ++ranged > 1) return new Response('gone', { status: 404 });
-    return honest(input, init);
-  };
-  const probe = await probeLeaf({ ...settings(null), fetchFn, offset: LEAF });
-  assert.equal(probe.result, 'mismatch');
-  assert.match(probe.detail, /HTTP 404/);
+test('a probe verifies the whole leaf covering its offset, and only that leaf', async () => {
+  const fragment = (offset) => mp4Leaves(track.bytes).find((leaf) => leaf.offset <= offset && offset < leaf.offset + leaf.length);
+  const probed = fragment(2 * MiB);
+  const flipped = (at) => { const bytes = new Uint8Array(track.bytes); bytes[at] ^= 0xff; return bytes; };
+  const far = await probeLeaf({ ...settings(flipped(probed.offset + probed.length - 1)), offset: 2 * MiB });
+  assert.equal(far.result, 'mismatch', 'a flipped byte far from the offset, in the same fragment');
+  const next = await probeLeaf({ ...settings(flipped(probed.offset + probed.length)), offset: 2 * MiB });
+  assert.equal(next.result, 'match', 'a flipped byte in the next fragment is not this probe\'s');
 });
 
 test('a delivery that answers 404 is unavailable, not a mismatch', async () => {
-  const probe = await probeLeaf({ ...settings(null), offset: LEAF });
+  const probe = await probeLeaf({ ...settings(null), offset: MiB });
   assert.equal(probe.result, 'unavailable');
   assert.equal(probe.detail, '<signed URL>: HTTP 404', 'the signed URL never leaves the probe');
 });

@@ -4,34 +4,35 @@
 // bans the source for the file's lifetime, and every probe must stand alone.
 import { VerificationError, VerifiedFile } from 'veritiles';
 
-import { DEFAULT_CHUNK as LEAF } from './pack-fixed.js';
+export const MiB = 1 << 20;
 
-export { DEFAULT_CHUNK as LEAF } from './pack-fixed.js';
-
-// Leaf-aligned offsets of k distinct mid-file leaves for a `size`-byte file.
-// The head leaf is skipped (moov/sidx can churn without a re-encode) and so
-// is the partial tail; mid-file mdat leaves are the high-signal region.
+// The starts of k distinct mid-file MiB of a `size`-byte file; a probe
+// verifies the leaf covering one. The first MiB is skipped (the head:
+// moov/sidx can churn without a re-encode) and so is the partial tail;
+// mid-file fragments are the high-signal region.
 export function probeOffsets(size, k, random = Math.random) {
-  const leaves = Math.ceil(size / LEAF);
-  const candidates = leaves > 2 ? Array.from({ length: leaves - 2 }, (_, i) => i + 1) : [0];
+  const slots = Math.ceil(size / MiB);
+  const candidates = slots > 2 ? Array.from({ length: slots - 2 }, (_, i) => i + 1) : [0];
   const picked = [];
   const pool = [...candidates];
   while (picked.length < Math.min(k, candidates.length)) {
     picked.push(...pool.splice(Math.floor(random() * pool.length), 1));
   }
-  return picked.sort((a, b) => a - b).map((i) => i * LEAF);
+  return picked.sort((a, b) => a - b).map((i) => i * MiB);
 }
 
-// One leaf read through a fresh client: 'match' when it verified,
-// 'mismatch' when the source served bytes that failed against the anchor
-// (even if a retry then failed for another reason), 'unavailable' for
-// anything else (transport, HTTP status, expired delivery).
+// The leaf covering `offset`, read through a fresh client — a one-byte
+// read fetches and verifies that whole leaf, whatever its extent: 'match'
+// when it verified, 'mismatch' when the source served bytes that failed
+// against the anchor (even if a retry then failed for another reason),
+// 'unavailable' for anything else (transport, HTTP status, expired
+// delivery).
 export async function probeLeaf({ cid, source, proof, fetchFn, offset }) {
   const vf = new VerifiedFile({ cid, source, proof, fetchFn });
   const started = Date.now();
   try {
-    const bytes = await vf.read(offset, LEAF);
-    return { offset, result: 'match', bytes: bytes.length, ms: Date.now() - started };
+    await vf.read(offset, 1);
+    return { offset, result: 'match', ms: Date.now() - started };
   } catch (err) {
     const result = vf.stats.rejected > 0 || isVerificationFailure(err) ? 'mismatch' : 'unavailable';
     return { offset, result, detail: rootMessage(err), ms: Date.now() - started };

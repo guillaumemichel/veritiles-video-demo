@@ -8,24 +8,24 @@ import { test } from 'node:test';
 
 import { VerificationError, VerifiedFile } from 'veritiles';
 
-import { packFixed } from '../scripts/lib/pack-fixed.js';
+import { packMp4 } from '../scripts/lib/pack-mp4.js';
 import { mimeType, parseHead } from '../web/mp4.js';
 import { startStream } from '../web/player.js';
 import { fakeMse } from './lib/fake-mse.js';
 import { memFetch, syntheticTrack, tampered } from './lib/track-fixture.js';
 
-function fixture(name, options) {
+async function fixture(name, options) {
   const { bytes, codecs } = syntheticTrack(options);
-  const { anchor, proofs } = packFixed(bytes);
+  const { anchor, proofs } = await packMp4(bytes);
   const url = `https://cdn.example/${name}.mp4`;
   return { name, url, bytes, anchor, proofs, mime: mimeType(codecs), segments: parseHead(bytes).index.segments };
 }
 
 // 40 s of video, 28 s of audio: from t=0 the 30 s read-ahead drains the
-// audio but not the video. Both span several 1 MiB leaves, so a later leaf
-// can be tampered behind an honest head.
-const video = fixture('video', { kind: 'video', segments: 8, segmentSize: 300_000, segmentSeconds: 5, seed: 2 });
-const audio = fixture('audio', { kind: 'audio', segments: 7, segmentSize: 200_000, segmentSeconds: 4, seed: 3 });
+// audio but not the video. Every segment is a leaf of its own, so a later
+// one can be tampered behind an honest head.
+const video = await fixture('video', { kind: 'video', segments: 8, segmentSize: 300_000, segmentSeconds: 5, seed: 2 });
+const audio = await fixture('audio', { kind: 'audio', segments: 7, segmentSize: 200_000, segmentSeconds: 4, seed: 3 });
 const fixtures = [video, audio];
 const EVIL = 'https://evil.example/video.mp4';
 
@@ -116,7 +116,7 @@ test('a head failure rejects with it and cuts the other track\'s head read short
   const neverAnswers = (signal) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
   const env = install(t, (input, init) => (String(input) === audio.url ? neverAnswers(init.signal) : serve(input, init)));
   const element = env.video();
-  const otherFile = packFixed(new Uint8Array(1)).anchor;
+  const otherFile = (await packMp4(syntheticTrack({ segments: 1, seed: 99 }).bytes)).anchor;
   const tracks = [spec(video, { cid: otherFile }), spec(audio)];
   await assert.rejects(
     startStream({ video: element, tracks, VerifiedFile: env.VerifiedFile }),
@@ -177,7 +177,7 @@ test('stop mid-play aborts the reads, removes the listeners and hands the elemen
 
 test('a tampered leaf mid-track fails closed: the error surfaces and no track appends again', async (t) => {
   const evil = new Uint8Array(audio.bytes);
-  evil[evil.length - 1] ^= 0xff; // the second, last leaf: segments 5 and 6
+  evil[audio.segments[5].offset + 100] ^= 0xff; // segment 5's leaf
   const { env, element, updates } = await play(t, { fetchFn: host(new Map([[video.url, video.bytes], [audio.url, evil]])) });
   const { error, stats } = updates.at(-1);
   assert.ok(error.errors.some((e) => e instanceof VerificationError));

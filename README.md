@@ -16,15 +16,17 @@ re-derive from the YouTube URL — see
 
 ## How it works
 
-- **Pack** — a fragmented MP4 is cut into 1 MiB leaves; their sha2-256
+- **Pack** — a fragmented MP4 is cut into one leaf per fragment (its
+  `moof` and `mdat`), after one for the init section; their sha2-256
   digests are sharded into a tiny proof directory whose descriptor hashes to
-  the anchor CID, the page's only trust input (`scripts/lib/pack-fixed.js`,
-  the veritiles `fixed` profile).
+  the anchor CID, the page's only trust input (`scripts/lib/pack-mp4.js`,
+  the veritiles v0.5 `mp4` profile).
 - **Stream** — per track the player reads the first verified leaf, parses
   the file's global `sidx` (written by `ffmpeg -movflags +global_sidx`, and
   by YouTube's packager) and derives the MSE codecs string from its `moov`,
-  then appends moof/mdat segments to its own SourceBuffer with ~30 s of
-  buffer ahead; seeking jumps every read cursor to the covering segment
+  then appends moof/mdat segments to its own SourceBuffer — each segment
+  one leaf, fetched in one `Range` request — with ~30 s of buffer ahead;
+  seeking jumps every read cursor to the covering segment
   (`web/player.js`, `web/mp4.js`).
 - **Verify** — every read goes through the released `veritiles` client
   (`VerifiedFile`), which fetches only the proof pieces covering the read and
@@ -77,14 +79,18 @@ failover for every track that has a malicious mirror — before deploying.
      -min_frag_duration 2000000 video.mp4
    ```
 
-2. Pack it with the veritiles repository packer (a development tool, not on
-   npm yet). It prints the anchor CID and writes `video.mp4.proofs/`:
+2. Pack it with the veritiles v0.5 repository packer (a development tool,
+   not on npm yet), which gives a fragmented MP4 one leaf per fragment. It
+   prints the anchor CID and writes `video.mp4.proofs/`:
 
    ```sh
-   git clone https://github.com/guillaumemichel/veritiles && cd veritiles
+   git clone --branch v0.5.0 https://github.com/guillaumemichel/veritiles && cd veritiles
    npm ci
-   npm run pack -- /path/to/video.mp4 --profile fixed
+   npm run pack -- /path/to/video.mp4
    ```
+
+   The page runs the v0.5 client, which rejects packs made by v0.4 and
+   earlier: re-pack those.
 
 3. Host `video.mp4` and `video.mp4.proofs/` side by side on any static host
    that answers single `Range` requests with 206 and sends
@@ -158,8 +164,8 @@ the licence is recorded per entry.
   `--source-base <url>` runs the same machinery against a served `dist/` as
   a mock YouTube.
 - **Verified streaming from YouTube** — `npm run watchtower -- --stream
-  <id>:<itag> | mpv -` reads the leaves in order instead of at random: a
-  CLI that streams and byte-verifies a track from YouTube itself.
+  <id>:<itag> | mpv -` reads the whole track in order instead of at random:
+  a CLI that streams and byte-verifies a track from YouTube itself.
 
 **In the browser.** A page cannot verify against YouTube directly:
 googlevideo opens CORS to youtube.com only (a cross-origin preflight for

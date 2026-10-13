@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 
 import { chooseItags, ingestVideo, isCreativeCommons, releaseCommand, releaseMirrors, releaseTag, shellQuote } from '../scripts/lib/ingest.js';
-import { packFixed } from '../scripts/lib/pack-fixed.js';
+import { packMp4 } from '../scripts/lib/pack-mp4.js';
 import { syntheticTrack } from './lib/track-fixture.js';
 
 const ID = 'abcdefghijk';
@@ -70,7 +70,8 @@ test('records anchors, digests, codecs and the recipe for reproducible tracks', 
   assert.equal(entry.recipe[1], 'sha256sum itag137.mp4');
 
   const t137 = entry.tracks['137'];
-  assert.equal(t137.anchor, packFixed(video.bytes).anchor);
+  const packed = await packMp4(video.bytes);
+  assert.equal(t137.anchor, packed.anchor);
   assert.equal(t137.map, undefined, 'the whole-file digest is recorded once, as sha256');
   assert.equal(t137.kind, 'video');
   assert.equal(t137.codecs, 'avc1.640029');
@@ -82,7 +83,7 @@ test('records anchors, digests, codecs and the recipe for reproducible tracks', 
 
   // The pack sits beside the file; the second download is gone.
   const root = await readFile(join(dir, 'itag137.mp4.proofs', 'root'));
-  assert.deepEqual(new Uint8Array(root), packFixed(video.bytes).proofs.get('root'));
+  assert.deepEqual(new Uint8Array(root), packed.proofs.get('root'));
   await assert.rejects(access(join(dir, 'itag137.mp4.again')));
 });
 

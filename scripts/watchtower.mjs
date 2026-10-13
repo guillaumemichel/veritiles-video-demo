@@ -13,7 +13,7 @@
 // proofs come from data/yt/ on disk, where yt-ingest wrote them. Cookie
 // flags in YT_DLP_ARGS are refused (lib/yt-dlp.js). Exit 0: every probe
 // matched or was unavailable. 2: a mismatch (YouTube serves other bytes
-// now — re-ingest for a new generation), or a streamed leaf failed. 1:
+// now — re-ingest for a new generation), or a streamed read failed. 1:
 // could not run.
 import { createWriteStream } from 'node:fs';
 import { access } from 'node:fs/promises';
@@ -24,7 +24,7 @@ import { parseArgs } from 'node:util';
 import { VerifiedFile } from 'veritiles';
 
 import { directoryFetch } from './lib/local-fetch.js';
-import { LEAF, probeTrack, rootMessage } from './lib/watchtower.js';
+import { MiB, probeTrack, rootMessage } from './lib/watchtower.js';
 import * as yt from './lib/yt-dlp.js';
 import { INDEX_FILE, readIndex, trackFile } from './lib/yt-index.js';
 
@@ -69,14 +69,14 @@ async function checkTrack(id, itag, track, options) {
     return ['unavailable'];
   }
   for (const probe of probes) {
-    console.log(`${id} itag ${itag} @${probe.offset / LEAF} MiB: ${probe.result}${probe.detail ? ` — ${probe.detail}` : ''} (${probe.ms} ms)`);
+    console.log(`${id} itag ${itag} @${probe.offset / MiB} MiB: ${probe.result}${probe.detail ? ` — ${probe.detail}` : ''} (${probe.ms} ms)`);
   }
   return probes.map((probe) => probe.result);
 }
 
-// Sequential leaves instead of random ones: the whole track
-// streamed and byte-verified from YouTube itself, anchor as the only trust
-// input. `node scripts/watchtower.mjs --stream <id>:<itag> | mpv -`.
+// Sequential reads instead of random ones, a MiB at a time: the whole
+// track streamed and byte-verified from YouTube itself, anchor as the only
+// trust input. `node scripts/watchtower.mjs --stream <id>:<itag> | mpv -`.
 async function stream(index, options) {
   const [id, itagText] = options.stream.split(':');
   const track = index.videos[id]?.tracks[itagText];
@@ -86,24 +86,24 @@ async function stream(index, options) {
   const vf = new VerifiedFile({ cid: track.anchor, source: delivery.url, proof: proofBase(id, Number(itagText), options), fetchFn: routedFetch(delivery) });
   await vf.ready();
   const out = options.out ? createWriteStream(options.out) : process.stdout;
-  const leaves = Math.ceil(vf.size / LEAF);
-  for (let leaf = 0; leaf < leaves; leaf++) {
+  const total = Math.ceil(vf.size / MiB);
+  for (let done = 0; done < total; done++) {
     let bytes;
     try {
-      bytes = await vf.read(leaf * LEAF, LEAF);
+      bytes = await vf.read(done * MiB, MiB);
     } catch (err) {
-      console.error(`\nstopped at leaf ${leaf}: ${rootMessage(err)} (${leaf} leaves verified, ${vf.stats.rejected} rejected)`);
+      console.error(`\nstopped at MiB ${done}: ${rootMessage(err)} (${done} MiB verified, ${vf.stats.rejected} rejected)`);
       process.exit(2);
     }
     await new Promise((res, rej) => out.write(bytes, (err) => (err ? rej(err) : res())));
-    progress(leaf + 1, leaves);
+    progress(done + 1, total);
   }
   if (process.stderr.isTTY) process.stderr.write('\n');
   if (options.out) out.end();
 }
 
 function progress(done, total) {
-  const line = `verified ${done}/${total} leaves`;
+  const line = `verified ${done}/${total} MiB`;
   if (process.stderr.isTTY) process.stderr.write(`\r${line}`);
   else if (done % 32 === 0 || done === total) process.stderr.write(`${line}\n`);
 }

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 
-import { packFixed } from '../scripts/lib/pack-fixed.js';
+import { packMp4 } from '../scripts/lib/pack-mp4.js';
 import { describeTrack, ensureTrackFile, packTrack, sha256Hex, writeProofs } from '../scripts/lib/tracks.js';
 import { syntheticTrack } from './lib/track-fixture.js';
 
@@ -35,8 +35,9 @@ test('packs the file beside itself with the same anchor the packer computes', as
   const path = join(dir, 'itag137.mp4');
   await writeFile(path, video.bytes);
   const packed = await packTrack(path);
-  assert.equal(packed.anchor, packFixed(video.bytes).anchor);
-  assert.equal(packed.map, packFixed(video.bytes).mapCid);
+  const direct = await packMp4(video.bytes);
+  assert.equal(packed.anchor, direct.anchor);
+  assert.equal(packed.map, direct.mapCid);
   assert.equal(packed.sha256, sha256Hex(video.bytes));
   assert.equal(packed.kind, 'video');
   await writeProofs(`${path}.proofs`, packed.proofs);

@@ -14,7 +14,6 @@ import { fileURLToPath } from 'node:url';
 import { VerifiedFile } from 'veritiles';
 
 import { directoryFetch } from './lib/local-fetch.js';
-import { DEFAULT_CHUNK } from './lib/pack-fixed.js';
 import { packTrack, tampered, writeProofs } from './lib/tracks.js';
 import { INDEX_FILE, readIndex, trackFile } from './lib/yt-index.js';
 
@@ -23,6 +22,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = join(repoRoot, 'data');
 const distDir = join(repoRoot, 'dist');
 const distOrigin = 'http://dist.invalid';
+const MiB = 1 << 20;
 
 async function main() {
   const bbb = await packTrack(join(dataDir, VIDEO));
@@ -143,14 +143,14 @@ async function verify({ packed: { anchor, bytes }, src, evil }) {
   if (evil === null) return;
 
   const failover = new VerifiedFile({ cid: anchor, source: [`${distOrigin}/${evil}`, good], proof, fetchFn });
-  expectEqual(await failover.read(0, DEFAULT_CHUNK), bytes.subarray(0, DEFAULT_CHUNK), `${src}: failover head read`);
+  expectEqual(await failover.read(0, MiB), bytes.subarray(0, MiB), `${src}: failover head read`);
   // The open may catch the tampered mirror twice (speculative fetch + the
   // ordered-failover read) — what must hold is: caught, then never again.
   const caught = failover.stats.rejected;
   if (caught < 1 || caught > 2) {
     throw new Error(`${src}: expected the tampered mirror to be caught at open, saw ${caught} rejections`);
   }
-  const later = Math.min(7 * DEFAULT_CHUNK, bytes.length - 4096);
+  const later = Math.min(7 * MiB, bytes.length - 4096);
   expectEqual(await failover.read(later, 4096), bytes.subarray(later, later + 4096), `${src}: post-ban read`);
   if (failover.stats.rejected !== caught) throw new Error(`${src}: tampered mirror was consulted again after the ban`);
 }

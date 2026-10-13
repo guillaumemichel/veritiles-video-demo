@@ -106,13 +106,14 @@
         above. A track's proof — a tiny descriptor plus a shard of leaf digests —
         is a directory of static files beside it (<code>&lt;url&gt;.proofs/</code>);
         the client fetches only the pieces covering what it reads and verifies
-        each 1&nbsp;MiB leaf with WebCrypto sha2-256 before use. From the first
-        verified leaf the player reads the codecs off the fragmented MP4's
-        <code>moov</code> and the segment list off its global <code>sidx</code>,
-        then streams moof/mdat segments into Media Source Extensions — one
-        SourceBuffer per track — with ~30&nbsp;s of buffer ahead; seeking jumps
-        every read cursor. A source whose bytes fail verification is dropped for
-        the rest of the session and the next one takes over.
+        each leaf — one per fragment — with WebCrypto sha2-256 before use.
+        From the first verified leaf the player reads the codecs off the
+        fragmented MP4's <code>moov</code> and the segment list off its global
+        <code>sidx</code>, then streams moof/mdat segments into Media Source
+        Extensions — one SourceBuffer per track — with ~30&nbsp;s of buffer
+        ahead; seeking jumps every read cursor. A source whose bytes fail
+        verification is dropped for the rest of the session and the next one
+        takes over.
       </p>
       <p>
         A YouTube video's tracks are the exact bytes YouTube serves for an itag

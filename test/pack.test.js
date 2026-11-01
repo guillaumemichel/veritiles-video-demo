@@ -1,11 +1,11 @@
 // The packer's contract is the released client: everything packMp4 emits
-// must open and verify through the published veritiles VerifiedFile, and
+// must open and verify through the published anymirror VerifiedFile, and
 // tampered bytes must fail closed with ordered failover. Its anchors are
 // the veritiles v0.5 repository packer's for the same file.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { VerifiedFile } from 'veritiles';
+import { VerifiedFile } from '@anymirror/core/file';
 
 import { mp4Leaves, packMp4 } from '../scripts/lib/pack-mp4.js';
 import { ascii, box, ftyp, moov, u32 } from './lib/bmff.js';
@@ -61,7 +61,7 @@ test('refuses what is not a well-formed fragmented MP4', async () => {
   await assert.rejects(packMp4(content.subarray(0, head)), /not a fragmented MP4/);
 });
 
-test('round-trips through the released veritiles client', async () => {
+test('round-trips through the released anymirror client', async () => {
   const vf = open(packed, new Map([[GOOD, content]]));
   await vf.ready();
   assert.equal(vf.size, content.length);

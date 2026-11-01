@@ -1,4 +1,4 @@
-// The veritiles `mp4` pack profile for a fragmented MP4: one leaf for the
+// The anymirror `mp4` pack profile for a fragmented MP4: one leaf for the
 // init section (ftyp, moov, the global sidx), one per fragment, and one for
 // any boxes after the last fragment; the leaf digests sharded and committed
 // in a strict DRISL descriptor whose sha2-256 is the anchor CID. A player
@@ -20,7 +20,7 @@ const RAW_CODE = 0x55;
 const DAG_CBOR_CODE = 0x71;
 const SHA2_256_CODE = 0x12;
 const BLAKE3_CODE = 0x1e; // the map only: it names the file, no client recomputes it
-const DESCRIPTOR_CAP = 256 * 1024; // {proof}/root body bound (veritiles SPEC §3.3)
+const DESCRIPTOR_CAP = 256 * 1024; // {proof}/root body bound (anymirror SPEC §2.1)
 // The top meta is a descriptor byte string, whose DRISL head carries at
 // most a 2-byte length.
 const TOP_META_MAX_ENTRIES = Math.floor(0xffff / META_RECORD_SIZE);
@@ -115,7 +115,7 @@ function boxAt(bytes, offset) {
   return { offset, size, type: String.fromCharCode(...bytes.subarray(offset + 4, offset + 8)) };
 }
 
-// The canonical descriptor template (veritiles src/descriptor.ts, no unixfs):
+// The canonical descriptor template (@anymirror/core src/descriptor.ts, no unixfs):
 //   a4 "v" <uint 1> "map" tag42(mapCid) "meta" <bytes topMeta> "mapSize" <uint>
 function encodeDescriptor({ mapCidBytes, topMeta, mapSize }) {
   if (mapCidBytes.length !== 36) throw new Error('map CID must be 36 binary bytes');

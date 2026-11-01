@@ -1,4 +1,4 @@
-// The multi-track MSE player driven from node: real veritiles VerifiedFiles
+// The multi-track MSE player driven from node: real anymirror VerifiedFiles
 // over in-memory hosts, a fake MediaSource that buffers the time span of
 // each verified segment, and the test moving the clock — the lifecycle
 // scripts/browser-check.mjs checks in Chromium, minus real decoding.
@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { getEventListeners } from 'node:events';
 import { test } from 'node:test';
 
-import { VerificationError, VerifiedFile } from 'veritiles';
+import { VerificationError, VerifiedFile } from '@anymirror/core/file';
 
 import { packMp4 } from '../scripts/lib/pack-mp4.js';
 import { mimeType, parseHead } from '../web/mp4.js';

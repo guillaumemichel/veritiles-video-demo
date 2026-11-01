@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import * as lib from 'veritiles';
+import * as lib from '@anymirror/core/file';
 
 import { describe, parseSource, queryOf } from '../web/app.js';
 

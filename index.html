@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>veritiles — verified video from an untrusted host</title>
+  <title>anymirror — verified video from an untrusted host</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
@@ -59,7 +59,7 @@
     <p class="lede">
       This player streams video — Big Buck Bunny by default — over plain HTTP
       range requests and cryptographically verifies every byte against
-      <a href="https://github.com/guillaumemichel/veritiles">veritiles</a> anchor CIDs
+      <a href="https://github.com/anymirror-dev/anymirror">anymirror</a> anchor CIDs
       before the decoder sees it. The host is untrusted: flip the switch below to
       route reads through a mirror serving tampered bytes — they are caught,
       counted, and never rendered. A video can also be the pristine tracks YouTube
@@ -72,7 +72,7 @@
       <button id="load" type="submit">Load</button>
     </form>
     <p class="hint">
-      Paste any anchor CID and the URL of a file packed with veritiles; proofs are
+      Paste any anchor CID and the URL of a file packed with anymirror-pack; proofs are
       read from <code>&lt;url&gt;.proofs/</code>. Separate video and audio tracks
       (YouTube itags) take one CID and one URL each, whitespace-separated.
     </p>
@@ -133,11 +133,11 @@
     </footer>
   </main>
   <script type="module">
-    import * as veritiles from './vendor/veritiles.js';
+    import * as anymirror from './vendor/anymirror/entries/file.js';
     import { startStream } from './web/player.js';
     import { boot } from './web/app.js';
     const CONFIG = 'VERITILES_CONFIG';
-    boot({ config: CONFIG, veritiles, startStream });
+    boot({ config: CONFIG, anymirror, startStream });
   </script>
 </body>
 </html>

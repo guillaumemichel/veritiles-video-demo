@@ -1,4 +1,4 @@
-// Media Source Extensions player over veritiles VerifiedFiles, one per
+// Media Source Extensions player over anymirror VerifiedFiles, one per
 // track: a muxed file is one track, a YouTube-style pair (video itag +
 // audio itag) is two. Each track owns a SourceBuffer, a segment index read
 // off its global sidx and a read cursor; they share one MediaSource and the

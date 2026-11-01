@@ -14,8 +14,8 @@ const IDS = ['video', 'source', 'preset', 'cid', 'src', 'toggle', 'evilToggle', 
 const TAMPER_BANNER = '⛔ Tampered bytes caught and rejected — the malicious mirror is banned for this '
   + 'session, and playback continues from the honest one. Not one altered byte was rendered.';
 
-// { config: { presets }, veritiles: the library namespace, startStream }
-export function boot({ config, veritiles, startStream }) {
+// { config: { presets }, anymirror: the library namespace, startStream }
+export function boot({ config, anymirror, startStream }) {
   const els = Object.fromEntries(IDS.map((id) => [id, document.getElementById(id)]));
   const presets = (config.presets ?? []).map(resolvePreset);
   let active = null; // { tracks: [{ cid, src, evil? }], preset? } — what playback runs on
@@ -111,7 +111,7 @@ export function boot({ config, veritiles, startStream }) {
     opening = startStream({
       video: els.video,
       tracks: tracks.map((t) => ({ cid: t.cid, sources: tampered && t.evil ? [t.evil, t.src] : [t.src], proof: proofOf(t.src) })),
-      VerifiedFile: veritiles.VerifiedFile,
+      VerifiedFile: anymirror.VerifiedFile,
       labels: labelsFor(active),
       onUpdate: (snapshot) => { if (gen === generation) render(snapshot); },
       signal: openCtl.signal,
@@ -120,7 +120,7 @@ export function boot({ config, veritiles, startStream }) {
     try {
       stream = await opening;
     } catch (err) {
-      if (gen === generation) showAlert(describe(err, tracks.map((t) => t.src), veritiles));
+      if (gen === generation) showAlert(describe(err, tracks.map((t) => t.src), anymirror));
       return;
     } finally {
       opening = null;
@@ -157,7 +157,7 @@ export function boot({ config, veritiles, startStream }) {
     // A stream's error and rejections are sticky; paint their alert only when
     // it changes, so a later form error stays readable while the previous
     // source plays on. render(null) resets both on restart.
-    const alert = snapshot.error ? describe(snapshot.error, active.tracks.map((t) => t.src), veritiles)
+    const alert = snapshot.error ? describe(snapshot.error, active.tracks.map((t) => t.src), anymirror)
       : stats.rejected > 0 ? TAMPER_BANNER : null;
     if (alert !== null && alert !== shownStreamAlert) {
       shownStreamAlert = alert;
@@ -288,7 +288,7 @@ export function describe(err, src, lib) {
   if (err instanceof lib.RangeBlockedError) {
     return '✗ the host refused the cross-origin Range request — it must allow the Range header (Access-Control-Allow-Headers: Range)';
   }
-  if (err instanceof lib.NotFoundError || /\bHTTP 404\b/.test(message)) {
+  if (/\bHTTP 404\b/.test(message)) {
     const srcs = [].concat(src);
     const where = srcs.length === 1 ? `${proofOf(srcs[0])}/` : '<url>.proofs/ beside each track';
     return `✗ not found — proofs must sit beside the video at ${where} (${message})`;

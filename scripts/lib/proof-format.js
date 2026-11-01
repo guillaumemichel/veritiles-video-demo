@@ -1,7 +1,7 @@
-// Build-side constants for the veritiles proof format (the sharded
+// Build-side constants for the anymirror proof format (the sharded
 // `.proofs/` tree beside every published file). This is the publisher half
-// of the wire contract; the browser-side decoder ships in the veritiles
-// library, which reads exactly this layout (its src/proof-format.ts).
+// of the wire contract; the browser-side decoder ships in
+// @anymirror/core, which reads exactly this layout (its src/proof-format.ts).
 //
 //   shard file := ( u32le(relativeOffset) digest32 )+           fixed 36 B records
 //   meta file  := ( kind:u8 u64le(rangeLength ≥ 1) digest32 )+  fixed 41 B records

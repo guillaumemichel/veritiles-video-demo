@@ -1,5 +1,5 @@
 // A track on disk as the demo publishes it: what the player will learn from
-// its head, its veritiles pack, and the mirror route that fetches a track
+// its head, its anymirror pack, and the mirror route that fetches a track
 // the index names when yt-dlp is not an option (CI runners are bot-checked).
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';

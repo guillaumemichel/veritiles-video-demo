@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 // Assemble the static site: pack data/bbb.mp4 and every YouTube track
-// yt-index.json names into veritiles proof directories, publish each video
+// yt-index.json names into anymirror proof directories, publish each video
 // beside a deliberately tampered mirror copy, inject the presets (freshly
 // computed anchors + paths, the YouTube origins, the watchtower's last
 // word) into the page, and read the result back through the released
 // client — honest path and tampered-first failover — before calling the
 // build good.
 import { Buffer } from 'node:buffer';
-import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { VerifiedFile } from 'veritiles';
+import { VerifiedFile } from '@anymirror/core/file';
 
 import { directoryFetch } from './lib/local-fetch.js';
 import { packTrack, tampered, writeProofs } from './lib/tracks.js';
@@ -39,8 +39,10 @@ async function main() {
     checks.push(...tracks);
   }
   await cp(join(repoRoot, 'web'), join(distDir, 'web'), { recursive: true });
-  await mkdir(join(distDir, 'vendor'), { recursive: true });
-  await copyFile(join(repoRoot, 'node_modules', 'veritiles', 'dist', 'index.js'), join(distDir, 'vendor', 'veritiles.js'));
+  await cp(join(repoRoot, 'node_modules', '@anymirror', 'core', 'dist'), join(distDir, 'vendor', 'anymirror'), {
+    recursive: true,
+    filter: (path) => !path.endsWith('.d.ts'),
+  });
   await writeFile(join(distDir, 'index.html'), injectConfig(await readFile(join(repoRoot, 'index.html'), 'utf8'), { presets }));
 
   for (const check of checks) await verify(check);

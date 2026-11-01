@@ -2,7 +2,7 @@
 // mid-file leaves through VerifiedFile and let verification, proof descent
 // and failure accounting come free. One VerifiedFile per probe — a mismatch
 // bans the source for the file's lifetime, and every probe must stand alone.
-import { VerificationError, VerifiedFile } from 'veritiles';
+import { VerificationError, VerifiedFile } from '@anymirror/core/file';
 
 export const MiB = 1 << 20;
 

@@ -4,7 +4,7 @@
 
 This player streams Big Buck Bunny from a dumb static host over plain HTTP
 range requests and cryptographically verifies every byte against a single
-[veritiles](https://github.com/guillaumemichel/veritiles) anchor CID before
+[anymirror](https://github.com/anymirror-dev/anymirror) anchor CID before
 the decoder renders it. A second, deliberately tampered mirror is published
 next to the honest one: route reads through it and watch the altered bytes
 get caught, counted, and never rendered — playback fails over seamlessly.
@@ -20,7 +20,7 @@ re-derive from the YouTube URL — see
   `moof` and `mdat`), after one for the init section; their sha2-256
   digests are sharded into a tiny proof directory whose descriptor hashes to
   the anchor CID, the page's only trust input (`scripts/lib/pack-mp4.js`,
-  the veritiles v0.5 `mp4` profile).
+  anymirror's `mp4` profile).
 - **Stream** — per track the player reads the first verified leaf, parses
   the file's global `sidx` (written by `ffmpeg -movflags +global_sidx`, and
   by YouTube's packager) and derives the MSE codecs string from its `moov`,
@@ -28,8 +28,8 @@ re-derive from the YouTube URL — see
   one leaf, fetched in one `Range` request — with ~30 s of buffer ahead;
   seeking jumps every read cursor to the covering segment
   (`web/player.js`, `web/mp4.js`).
-- **Verify** — every read goes through the released `veritiles` client
-  (`VerifiedFile`), which fetches only the proof pieces covering the read and
+- **Verify** — every read goes through the released `@anymirror/core`
+  client (`VerifiedFile`, from `@anymirror/core/file`), which fetches only the proof pieces covering the read and
   verifies each leaf before use. A source whose bytes fail verification is
   banned for the session and the next source takes over.
 - **Select** — a source is one or more tracks, each an anchor CID plus a
@@ -52,7 +52,7 @@ yt/<videoId>/itag136.mp4          # a pristine YouTube track, exactly as served
 yt/<videoId>/itag136.mp4.proofs/
 yt/<videoId>/itag140.mp4          # …its audio track, and (smallest track only)
 yt/<videoId>/evil/itag140.mp4     # its malicious mirror
-vendor/veritiles.js               # the released client, unmodified
+vendor/anymirror/                 # the released client (@anymirror/core's dist/), unmodified
 web/mp4.js                        # sidx and codecs reader
 web/player.js                     # MSE player, one SourceBuffer per track
 web/app.js                        # page controller: presets, ?cid&src, tamper toggle, YouTube panel
@@ -79,18 +79,17 @@ failover for every track that has a malicious mirror — before deploying.
      -min_frag_duration 2000000 video.mp4
    ```
 
-2. Pack it with the veritiles v0.5 repository packer (a development tool,
-   not on npm yet), which gives a fragmented MP4 one leaf per fragment. It
-   prints the anchor CID and writes `video.mp4.proofs/`:
+2. Pack it with `anymirror-pack`, which gives a fragmented MP4 one leaf per
+   fragment. It prints the anchor CID and writes `video.mp4.proofs/`:
 
    ```sh
-   git clone --branch v0.5.0 https://github.com/guillaumemichel/veritiles && cd veritiles
-   npm ci
-   npm run pack -- /path/to/video.mp4
+   git clone --branch v0.7.0 https://github.com/anymirror-dev/anymirror
+   cargo install --path anymirror/packer
+   anymirror-pack /path/to/video.mp4
    ```
 
-   The page runs the v0.5 client, which rejects packs made by v0.4 and
-   earlier: re-pack those.
+   The page runs the 0.7 client, which reads packs made since veritiles
+   v0.5; it rejects packs made by v0.4 and earlier: re-pack those.
 
 3. Host `video.mp4` and `video.mp4.proofs/` side by side on any static host
    that answers single `Range` requests with 206 and sends

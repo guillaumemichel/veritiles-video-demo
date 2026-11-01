@@ -1,5 +1,5 @@
 // Build-side encoders for the map-package proof format. The decoder half now
-// ships in the veritiles library (VerifiedSource); the format constants and
+// ships in @anymirror/core (VerifiedFile); the format constants and
 // record layouts these encoders must match live in ./proof-format.js.
 import {
   DIGEST_LENGTH,

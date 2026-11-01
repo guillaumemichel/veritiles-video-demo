@@ -21,7 +21,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { VerifiedFile } from 'veritiles';
+import { VerifiedFile } from '@anymirror/core/file';
 
 import { directoryFetch } from './lib/local-fetch.js';
 import { MiB, probeTrack, rootMessage } from './lib/watchtower.js';
